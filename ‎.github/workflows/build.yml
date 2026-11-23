@@ -1,0 +1,59 @@
+name: Build APK
+
+on:
+  push:
+    branches: [main, master]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Unpack the newest zip
+        run: |
+          newest=$(for z in *.zip; do echo "$(git log -1 --format=%ct -- "$z") $z"; done | sort -n | tail -1 | cut -d' ' -f2-)
+          echo "Using: $newest"
+          rm -rf ArchTV
+          unzip -q "$newest"
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: 8.7
+
+      - name: Build debug APK
+        working-directory: ArchTV
+        run: |
+          set -o pipefail
+          gradle assembleDebug --no-daemon --console=plain 2>&1 | tee ../build.log
+
+      - name: Show the errors
+        if: failure()
+        run: grep -nE "^e: |error:|What went wrong|Execution failed" -A4 build.log | head -60 || true
+
+      - name: Copy APK
+        run: cp ArchTV/app/build/outputs/apk/debug/app-debug.apk ArchTV.apk
+
+      - name: Keep a copy as a build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ArchTV-APK
+          path: ArchTV.apk
+
+      - name: Publish to a public release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: latest
+          name: Arch TV (latest build)
+          files: ArchTV.apk
